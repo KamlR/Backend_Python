@@ -3,63 +3,38 @@ import pytest
 from unittest.mock import AsyncMock
 from services import moderation
 
-@pytest.mark.parametrize("payload, expected", [
-    ({"is_verified_seller": True, "images_qty": 0}, True),
-    ({"is_verified_seller": True, "images_qty": 1}, True),
-    ({"is_verified_seller": True}, True),
-])
-def test_predict_verified_seller_allowed(app_client, payload, expected):
-    base = {
-        "seller_id": 1,
-        "item_id": 1,
-        "name": "Item",
-        "description": "Desc",
-        "category": 1,
-    }
-    base.update(payload)
+BASE_PAYLOAD = {
+    "seller_id": 1,
+    "item_id": 1,
+    "name": "Item",
+    "description": "Nice item",
+    "category": 10,
+    "is_verified_seller": False,
+    "images_qty": 2,
+}
 
-    response = app_client.post("/predict", json=base)
+
+def test_predict_violation_true(app_client, allow_model):
+    app_client.app.state.model = allow_model
+
+    response = app_client.post("/predict", json=BASE_PAYLOAD)
+
     assert response.status_code == HTTPStatus.OK
-    assert response.json()["is_allowed"] is expected
-     
 
-@pytest.mark.parametrize("payload, expected", [
-    ({"is_verified_seller": False, "images_qty": 1}, True),
-    ({"is_verified_seller": False, "images_qty": 5}, True)
-])
-def test_predict_seller_with_images_allowed(app_client, payload, expected):
-    base = {
-        "seller_id": 1,
-        "item_id": 1,
-        "name": "Item",
-        "description": "Desc",
-        "category": 1,
-    }
-    base.update(payload)
+    data = response.json()
+    assert data["is_violation"] is True
+    assert 0 <= data["probability"] <= 1
 
-    response = app_client.post("/predict", json=base)
+def test_predict_violation_false(app_client, deny_model):
+    app_client.app.state.model = deny_model
+
+    response = app_client.post("/predict", json=BASE_PAYLOAD)
+
     assert response.status_code == HTTPStatus.OK
-    assert response.json()["is_allowed"] is expected
 
-
-@pytest.mark.parametrize("payload, expected", [
-    ({"is_verified_seller": False, "images_qty": 0}, False),
-    ({"is_verified_seller": False}, False)
-])
-def test_predict_seller_not_allowed(app_client, payload, expected):
-    base = {
-        "seller_id": 1,
-        "item_id": 1,
-        "name": "Item",
-        "description": "Desc",
-        "category": 1,
-    }
-    base.update(payload)
-
-    response = app_client.post("/predict", json=base)
-    assert response.status_code == HTTPStatus.OK
-    assert response.json()["is_allowed"] is expected
-
+    data = response.json()
+    assert data["is_violation"] is False
+    assert 0 <= data["probability"] <= 1
 
 def test_predict_validation_wrong_type(app_client):
     response = app_client.post(
@@ -70,48 +45,17 @@ def test_predict_validation_wrong_type(app_client):
             "item_id": 2,
             "name": "Phone",
             "description": "Good phone",
-            "category": 1
-        }
+            "category": 1,
+            "images_qty": 1,
+        },
     )
 
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
+def test_predict_model_not_loaded(app_client):
+    app_client.app.state.model = None
 
-def test_predict_validation_missing_field(app_client):
-  response = app_client.post(
-      "/predict",
-      json={
-          "seller_id": 1,
-          "is_verified_seller": True,
-          "item_id": 2,
-          "description": "No name"
-      }
-  )
+    response = app_client.post("/predict", json=BASE_PAYLOAD)
 
-  assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
-
-
-def test_predict_business_logic_error(app_client, monkeypatch):
-    async def mock_predict(dto):
-        raise Exception("Service failed")
-
-    monkeypatch.setattr(
-        moderation.ModerationService,
-        "predict",
-        AsyncMock(side_effect=mock_predict)
-    )
-
-    response = app_client.post(
-        "/predict",
-        json={
-            "seller_id": 1,
-            "is_verified_seller": True,
-            "item_id": 2,
-            "name": "Phone",
-            "description": "Good phone",
-            "category": 1
-        }
-    )
-
-    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert response.json()["detail"] == "Prediction failed"
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    assert response.json()["detail"] == "Model not loaded"

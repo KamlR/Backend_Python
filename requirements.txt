@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+numpy
+scikit-learn
+pydantic
+pytest
+httpx
+
+mlflow

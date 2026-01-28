@@ -13,4 +13,5 @@ class PredictAdvIn(BaseModel):
 
 
 class PredictAdvOut(BaseModel):
-  is_allowed: bool
+  is_violation: bool
+  probability: float
