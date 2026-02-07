@@ -4,6 +4,11 @@ numpy
 scikit-learn
 pydantic
 pytest
+pytest-asyncio
 httpx
+
+asyncpg
+psycopg2-binary
+yandex-pgmigrate
 
 mlflow

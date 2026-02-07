@@ -1,9 +1,8 @@
 from http import HTTPStatus
 import pytest
-from unittest.mock import AsyncMock
-from services import moderation
 
-BASE_PAYLOAD = {
+
+PREDICT_BASE_PAYLOAD = {
     "seller_id": 1,
     "item_id": 1,
     "name": "Item",
@@ -17,7 +16,7 @@ BASE_PAYLOAD = {
 def test_predict_violation_true(app_client, allow_model):
     app_client.app.state.model = allow_model
 
-    response = app_client.post("/predict", json=BASE_PAYLOAD)
+    response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
 
     assert response.status_code == HTTPStatus.OK
 
@@ -28,7 +27,7 @@ def test_predict_violation_true(app_client, allow_model):
 def test_predict_violation_false(app_client, deny_model):
     app_client.app.state.model = deny_model
 
-    response = app_client.post("/predict", json=BASE_PAYLOAD)
+    response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
 
     assert response.status_code == HTTPStatus.OK
 
@@ -55,7 +54,43 @@ def test_predict_validation_wrong_type(app_client):
 def test_predict_model_not_loaded(app_client):
     app_client.app.state.model = None
 
-    response = app_client.post("/predict", json=BASE_PAYLOAD)
+    response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
 
     assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.json()["detail"] == "Model not loaded"
+
+@pytest.mark.asyncio
+async def test_simple_predict_violation_true(async_client, app, allow_model, test_item):
+    app.state.model = allow_model
+
+    response = await async_client.post("/simple-predict", json={"item_id": test_item})
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["is_violation"] is True
+    assert 0 <= data["probability"] <= 1
+
+
+@pytest.mark.asyncio
+async def test_simple_predict_violation_false(async_client, app, deny_model, test_item):
+    app.state.model = deny_model
+
+    response = await async_client.post("/simple-predict", json={"item_id": test_item})
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["is_violation"] is False
+    assert 0 <= data["probability"] <= 1
+
+@pytest.mark.asyncio
+async def test_simple_predict_item_not_found(async_client, app, deny_model, test_item):
+    app.state.model = deny_model
+
+    response = await async_client.post("/simple-predict", json={"item_id": test_item})
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["is_violation"] is False
+    assert 0 <= data["probability"] <= 1
+
+

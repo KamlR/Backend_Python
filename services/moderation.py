@@ -1,5 +1,8 @@
 from dataclasses import dataclass
-from schemas.predict import PredictAdvIn
+from schemas.predict import PredictAdvIn, SimplePredictAdvIn
+from repositories.moderation import ModerationRepository
+from services.exceptions import ItemNotFoundError
+
 import numpy as np
 import logging
 
@@ -30,5 +33,15 @@ class ModerationService:
             is_violation,
             proba,
         )
-
         return is_violation, proba
+    
+    async def simplePredict(self, data: SimplePredictAdvIn) -> tuple[bool, float]:
+        moderationRepository = ModerationRepository()
+        full_data = await moderationRepository.get_item_for_prediction(data.item_id)
+        if full_data is None:
+            raise ItemNotFoundError
+        
+        predict_in = PredictAdvIn(**full_data)
+        return await self.predict(predict_in)
+        
+

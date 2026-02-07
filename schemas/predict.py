@@ -1,5 +1,4 @@
 from pydantic import BaseModel, Field
-from typing import Optional
 
 
 class PredictAdvIn(BaseModel):
@@ -9,8 +8,11 @@ class PredictAdvIn(BaseModel):
   name: str = Field(..., min_length=1)
   description: str = Field(..., min_length=1)
   category: int = Field(..., example=10)
-  images_qty: Optional[int] = Field(None, ge=0)
+  images_qty: int = Field(..., ge=0)
 
+
+class SimplePredictAdvIn(BaseModel):
+  item_id: int = Field(..., example=100)
 
 class PredictAdvOut(BaseModel):
   is_violation: bool
