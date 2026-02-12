@@ -17,3 +17,16 @@ class SimplePredictAdvIn(BaseModel):
 class PredictAdvOut(BaseModel):
   is_violation: bool
   probability: float
+
+class AsyncPredictAdvOut(BaseModel):
+  task_id: int 
+  status: str
+  message: str
+
+class ModerationResultOut(BaseModel):
+  task_id: int 
+  status: str
+  message: str | None
+  is_violation: bool | None
+  probability: float | None
+
