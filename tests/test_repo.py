@@ -1,14 +1,15 @@
 import pytest
 
 from db.connection import PostgresConnection
-from repositories.moderation import ModerationRepository 
+from repositories.user import UserRepository
+from repositories.items import ItemRepository
 from schemas.user import UserCreate
 from schemas.item import ItemCreate
 
 
 @pytest.mark.asyncio
 async def test_create_user_inserts_row():
-    repo = ModerationRepository()
+    userRepo = UserRepository()
     conn = await PostgresConnection.get()
 
     user = UserCreate(
@@ -17,7 +18,7 @@ async def test_create_user_inserts_row():
         is_verified_seller=True,
     )
 
-    seller_id = await repo.create_user(user)
+    seller_id = await userRepo.create_user(user)
     assert isinstance(seller_id, int)
     assert seller_id > 0
 
@@ -43,7 +44,7 @@ async def test_create_user_inserts_row():
 
 @pytest.mark.asyncio
 async def test_create_item_inserts_row_and_get_item_for_prediction():
-    repo = ModerationRepository()
+    itemRepo = ItemRepository()
     conn = await PostgresConnection.get()
 
     # 1) подготовка: создаём продавца
@@ -65,7 +66,7 @@ async def test_create_item_inserts_row_and_get_item_for_prediction():
             images_qty=2,
         )
 
-        item_id = await repo.create_item(item)
+        item_id = await itemRepo.create_item(item)
         assert isinstance(item_id, int)
         assert item_id > 0
 
@@ -87,7 +88,7 @@ async def test_create_item_inserts_row_and_get_item_for_prediction():
         assert row["images_qty"] == item.images_qty
 
         # 4) проверяем get_item_for_prediction (join с users)
-        dto = await repo.get_item_for_prediction(item_id)
+        dto = await itemRepo.get_item_for_prediction(item_id)
         assert dto is not None
         assert dto["item_id"] == item_id
         assert dto["seller_id"] == seller_id

@@ -3,18 +3,18 @@
 import asyncio
 from aiokafka import AIOKafkaConsumer
 import json
-from repositories.moderation import ModerationRepository
+from repositories.moderation_results import ModerationResultRepository
 from app.clients.kafka import KafkaClient
 
 
 class RetryModerationConsumer:
-    def __init__(self, server, mainTopic, retryTopic, dlqTopic, kafkaClient, moderationRepository):
+    def __init__(self, server, mainTopic, retryTopic, dlqTopic, kafkaClient, moderationResultRepository):
         self.server = server
         self.mainTopic = mainTopic
         self.retryTopic = retryTopic
         self.dlqTopic = dlqTopic
         self.kafkaClient = kafkaClient
-        self.moderationRepository = moderationRepository
+        self.moderationResultRepository = moderationResultRepository
         self.consumer: AIOKafkaConsumer | None = None
 
     async def start(self) -> None:
@@ -50,7 +50,7 @@ class RetryModerationConsumer:
                 if attempt <= max_attempts:
                     await self.kafkaClient.send_moderation_request(int(data.get("item_id")), self.mainTopic, int(data.get("attempt")),  int(data.get("max_attempts")), int(data.get("retry_delay_seconds")))
                 else:
-                    await self.moderationRepository.update_moderation_result(item_id, None, None, "failed", error_message)
+                    await self.moderationResultRepository.update_moderation_result(item_id, None, None, "failed", error_message)
                     await self.kafkaClient.send_moderation_request(int(data.get("item_id")), self.dlqTopic, int(data.get("attempt")),  int(data.get("max_attempts")), int(data.get("retry_delay_seconds")), error_message)
                 await self.consumer.commit()
         finally:
@@ -59,10 +59,10 @@ class RetryModerationConsumer:
 
 
 async def main() -> None:
-    moderationRepository = ModerationRepository()
+    moderationResultRepository = ModerationResultRepository()
     kafkaClient = KafkaClient("localhost:9092")
     await kafkaClient.start()
-    retryModerationConsumer = RetryModerationConsumer("localhost:9092", "moderation", "retry_moderation", "dlq_moderation", kafkaClient, moderationRepository)
+    retryModerationConsumer = RetryModerationConsumer("localhost:9092", "moderation", "retry_moderation", "dlq_moderation", kafkaClient, moderationResultRepository)
     await retryModerationConsumer.start()
     await retryModerationConsumer.run()
 

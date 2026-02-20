@@ -6,17 +6,17 @@ import json
 from model import load_model
 from services.moderation import ModerationService
 from schemas.predict import SimplePredictAdvIn
-from repositories.moderation import ModerationRepository
+from repositories.moderation_results import ModerationResultRepository
 from app.clients.kafka import KafkaClient
 
 class ModerationConsumer:
-    def __init__(self, server, mainTopic, retryTopic, moderationService, moderationRepository, kafkaClient):
+    def __init__(self, server, mainTopic, retryTopic, moderationService,  moderationResultRepository, kafkaClient):
         self.server = server
         self.mainTopic = mainTopic
         self.retryTopic = retryTopic
         self.consumer: AIOKafkaConsumer | None = None
         self.moderationService = moderationService
-        self.moderationRepository = moderationRepository
+        self.moderationResultRepository =  moderationResultRepository
         self.kafkaClient = kafkaClient
 
     async def start(self) -> None:
@@ -44,9 +44,8 @@ class ModerationConsumer:
                 try:
                     data = json.loads(msg.value.decode("utf-8"))
                     item_id = int(data.get("item_id"))
-                    raise Exception("Ml failed")
                     is_violation, proba = await self.moderationService.simplePredict(SimplePredictAdvIn(item_id=item_id))
-                    await self.moderationRepository.update_moderation_result(item_id, is_violation, proba, "completed")
+                    await self.moderationResultRepository.update_moderation_result(item_id, is_violation, proba, "completed")
                 except Exception as e:
                     await self.kafkaClient.send_moderation_request(item_id, self.retryTopic, int(data.get("attempt")) + 1,  int(data.get("max_attempts")), int(data.get("retry_delay_seconds")), str(e))
                 finally:
@@ -60,10 +59,10 @@ async def main() -> None:
     while model is None:
         model = load_model()
     moderationService = ModerationService(model)
-    moderationRepository = ModerationRepository()
+    moderationResultRepository = ModerationResultRepository()
     kafkaClient = KafkaClient("localhost:9092")
     await kafkaClient.start()
-    moderationConsumer = ModerationConsumer("localhost:9092", "moderation", "retry_moderation", moderationService, moderationRepository, kafkaClient)
+    moderationConsumer = ModerationConsumer("localhost:9092", "moderation", "retry_moderation", moderationService, moderationResultRepository, kafkaClient)
     await moderationConsumer.start()
     await moderationConsumer.run()
 

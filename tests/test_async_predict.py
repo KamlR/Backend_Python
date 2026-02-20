@@ -104,12 +104,12 @@ async def test_get_moderation_result(app, async_client, test_item):
 @pytest.mark.anyio
 async def test_worker_processes_message_successfully():
     moderationService = AsyncMock()
-    moderationRepository = AsyncMock()
+    moderationResultRepository = AsyncMock()
     kafkaClient = AsyncMock()
 
     # simplePredict возвращает (is_violation, proba)
     moderationService.simplePredict = AsyncMock(return_value=(True, 0.87))
-    moderationRepository.update_moderation_result = AsyncMock()
+    moderationResultRepository.update_moderation_result = AsyncMock()
     kafkaClient.send_moderation_request = AsyncMock()
 
     moderationConsumer = ModerationConsumer(
@@ -117,7 +117,7 @@ async def test_worker_processes_message_successfully():
         mainTopic="moderation",
         retryTopic="retry_moderation",
         moderationService=moderationService,
-        moderationRepository=moderationRepository,
+        moderationResultRepository=moderationResultRepository,
         kafkaClient=kafkaClient,
     )
 
@@ -136,7 +136,7 @@ async def test_worker_processes_message_successfully():
 
 
     moderationService.simplePredict.assert_awaited_once()
-    moderationRepository.update_moderation_result.assert_awaited_once_with(
+    moderationResultRepository.update_moderation_result.assert_awaited_once_with(
         123, True, 0.87, "completed"
     )
 
@@ -150,12 +150,12 @@ async def test_worker_processes_message_successfully():
 @pytest.mark.anyio
 async def test_worker_sends_to_retry_on_error():
     moderationService = AsyncMock()
-    moderationRepository = AsyncMock()
+    moderationResultRepository = AsyncMock()
     kafkaClient = AsyncMock()
 
     # форсим ошибку в simplePredict
     moderationService.simplePredict = AsyncMock(side_effect=RuntimeError("ML down"))
-    moderationRepository.update_moderation_result = AsyncMock()
+    moderationResultRepository.update_moderation_result = AsyncMock()
     kafkaClient.send_moderation_request = AsyncMock()
 
     moderationConsumer = ModerationConsumer(
@@ -163,7 +163,7 @@ async def test_worker_sends_to_retry_on_error():
         mainTopic="moderation",
         retryTopic="retry_moderation",
         moderationService=moderationService,
-        moderationRepository=moderationRepository,
+        moderationResultRepository=moderationResultRepository,
         kafkaClient=kafkaClient,
     )
 
@@ -178,7 +178,7 @@ async def test_worker_sends_to_retry_on_error():
     await moderationConsumer.run()
 
     # assert: completed update не должно быть
-    moderationRepository.update_moderation_result.assert_not_awaited()
+    moderationResultRepository.update_moderation_result.assert_not_awaited()
 
     # assert: отправили в retry с attempt+1 и error_message=str(e)
     kafkaClient.send_moderation_request.assert_awaited_once()
@@ -207,8 +207,8 @@ async def test_worker_sends_to_dlq(monkeypatch):
     kafkaClient = AsyncMock()
     kafkaClient.send_moderation_request = AsyncMock()
 
-    moderationRepository = AsyncMock()
-    moderationRepository.update_moderation_result = AsyncMock()
+    moderationResultRepository = AsyncMock()
+    moderationResultRepository.update_moderation_result = AsyncMock()
 
     worker = RetryModerationConsumer(
         server="localhost:9092",
@@ -216,7 +216,7 @@ async def test_worker_sends_to_dlq(monkeypatch):
         retryTopic="retry_moderation",
         dlqTopic="dlq_moderation",
         kafkaClient=kafkaClient,
-        moderationRepository=moderationRepository,
+        moderationResultRepository=moderationResultRepository,
     )
 
     # attempt 1..4 при max_attempts=3
@@ -253,7 +253,7 @@ async def test_worker_sends_to_dlq(monkeypatch):
     assert all_calls[3].args == (123, "dlq_moderation", 4, 3, 5, "ML down")
 
     # assert: БД обновили failed ровно 1 раз (на attempt 4)
-    moderationRepository.update_moderation_result.assert_awaited_once_with(
+    moderationResultRepository.update_moderation_result.assert_awaited_once_with(
         123, None, None, "failed", "ML down"
     )
 
