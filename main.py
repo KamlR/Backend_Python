@@ -6,6 +6,7 @@ from model import train_model, save_model, load_model
 import logging
 from app.clients.kafka import KafkaClient
 from db.connection import PostgresConnection
+import redis.asyncio as redis
 
 
 def run_migrations():
@@ -18,6 +19,14 @@ async def start_kafka():
     kafka = KafkaClient("localhost:9092")
     await kafka.start()
     app.state.kafka = kafka
+
+async def connect_to_redis():
+    redis_client = redis.Redis(
+    host="localhost",
+    port=6379,
+    decode_responses=True)
+    app.state.redis_client = redis_client
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +41,11 @@ async def lifespan(app: FastAPI):
     print("🔧 Starting kafka service...")
     await start_kafka()
     print("✅ Kafka started")
+
+    # Redis.
+    print("🔧 Connecting to redis...")
+    await connect_to_redis()
+    print("✅ Successfully connected to redis")
 
     # Работа с моделью.
     model = load_model()

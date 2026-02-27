@@ -6,7 +6,7 @@ from repositories.items import ItemRepository
 from schemas.user import UserCreate
 from schemas.item import ItemCreate
 
-
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_user_inserts_row():
     userRepo = UserRepository()
@@ -41,7 +41,7 @@ async def test_create_user_inserts_row():
     await conn.execute("DELETE FROM public.users WHERE seller_id = $1", seller_id)
     await conn.close()
 
-
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_item_inserts_row_and_get_item_for_prediction():
     itemRepo = ItemRepository()

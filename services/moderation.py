@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from schemas.predict import PredictAdvIn, SimplePredictAdvIn
 from repositories.items import ItemRepository
+from repositories.moderation_results import ModerationResultRepository
 from services.exceptions import ItemNotFoundError
 
 import numpy as np
@@ -10,8 +11,9 @@ logger = logging.getLogger("moderation")
 
 
 class ModerationService:
-    def __init__(self, model):
+    def __init__(self, model, redisPredictionStorage = None):
         self.model = model
+        self.redisPredictionStorage = redisPredictionStorage
 
     def _to_features(self, data: PredictAdvIn) -> np.ndarray:
         return np.array([[
@@ -21,11 +23,20 @@ class ModerationService:
             min(data.category, 100) / 100.0,
         ]])
 
-    async def predict(self, data: PredictAdvIn) -> tuple[bool, float]:
+    async def _predict_with_cache(self, data: PredictAdvIn) -> tuple[bool, float]:
+        cached = await self.redisPredictionStorage.get(data.item_id)
+        if cached is not None:
+            is_violation = cached["is_violation"]
+            proba = cached["proba"]
+            logger.info(
+                "cache_result seller_id=%s item_id=%s is_violation=%s probability=%.4f",
+                data.seller_id, data.item_id, is_violation, proba
+            )
+            return is_violation, proba
+
         features = self._to_features(data)
         proba = float(self.model.predict_proba(features)[0][1])
         is_violation = proba >= 0.5
-
         logger.info(
             "result seller_id=%s item_id=%s is_violation=%s probability=%.4f",
             data.seller_id,
@@ -33,7 +44,12 @@ class ModerationService:
             is_violation,
             proba,
         )
+        payload = {"is_violation": is_violation, "proba": proba}
+        await self.redisPredictionStorage.set(data.item_id, payload)
         return is_violation, proba
+    
+    async def predict(self, data: PredictAdvIn) -> tuple[bool, float]:
+        return await self._predict_with_cache(data)
     
     async def simplePredict(self, data: SimplePredictAdvIn) -> tuple[bool, float]:
         itemRepository = ItemRepository()
@@ -42,6 +58,22 @@ class ModerationService:
             raise ItemNotFoundError
         
         predict_in = PredictAdvIn(**full_data)
-        return await self.predict(predict_in)
+        return await self._predict_with_cache(predict_in)
+    
+    async def closeItem(self, item_id: int) -> bool:
+        itemRepository = ItemRepository()
+        moderestionResultRepo = ModerationResultRepository()
+        result = await itemRepository.delete_item(item_id)
+        if result == False:
+            raise ItemNotFoundError
+        await self.redisPredictionStorage.delete(item_id)
+
+        task_id = await moderestionResultRepo.delete_task(item_id)
+        if task_id is not None:
+            self.redisPredictionStorage.change_key_prefix("async_prediction")
+            await self.redisPredictionStorage.delete(task_id)
+
+
         
+
 

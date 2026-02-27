@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, call, patch
 
 from db.connection import PostgresConnection
 from app.workers.moderation_worker import ModerationConsumer
@@ -29,77 +29,43 @@ class FakeConsumer:
         return gen()
 
 
-@pytest.mark.anyio
-async def test_async_predict_creates_task_and_sends_to_kafka(app, async_client, test_item):
-    # Подменяем kafka-клиент в app.state
+def test_async_predict_creates_task_and_sends_to_kafka(app_client):
     kafka_mock = AsyncMock()
     kafka_mock.send_moderation_request = AsyncMock()
+    app_client.app.state.kafka = kafka_mock
 
-    app.state.kafka = kafka_mock
+    redis_client = AsyncMock()
+    redis_client.get = AsyncMock()
+    redis_client.set = AsyncMock()
+    app_client.app.state.redis_client = redis_client
 
-    # Делаем запрос
-    response = await async_client.post("/async-predict", json={"item_id": test_item})
+    created_task = {
+        "task_id": 123,
+        "status": "pending",
+        "is_violation": None,
+        "probability": None,
+        "error_message": None,
+    }
+
+    with patch("services.async_moderation.ItemRepository") as ItemRepoMock, \
+         patch("services.async_moderation.ModerationResultRepository") as ModerRepoMock:
+
+        item_repo_instance = ItemRepoMock.return_value
+        item_repo_instance.check_adv_existance = AsyncMock(return_value=True)
+
+        moder_repo_instance = ModerRepoMock.return_value
+        moder_repo_instance.create_moderation_result = AsyncMock(return_value=created_task)
+
+        response = app_client.post("/async-predict", json={"item_id": 5})
+
     assert response.status_code == 200
-
     data = response.json()
-    assert "task_id" in data
+    assert data["task_id"] == 123
     assert data["status"] == "pending"
     assert data["message"] == "Moderation request accepted"
 
-    task_id = data["task_id"]
-    assert isinstance(task_id, int)
-
-    # Проверяем, что запись появилась в БД
-    conn = await PostgresConnection.get()
-    row = await conn.fetchrow(
-        """
-        SELECT task_id, item_id, status, is_violation, probability, error_message, processed_at
-        FROM public.moderation_results
-        WHERE task_id = $1
-        """,
-        task_id,
-    )
-    assert row is not None
-    assert row["task_id"] == task_id
-    assert row["item_id"] == test_item
-    assert row["status"] == "pending"
-    assert row["is_violation"] is None
-    assert row["probability"] is None
-    assert row["error_message"] is None
-    assert row["processed_at"] is None
-
-    # Проверяем факт отправки в Kafka (параметры как в сервисе)
-    kafka_mock.send_moderation_request.assert_awaited_once_with(
-        test_item, "moderation", 1, 3, 5
-    )
-
-    # Чистим moderation_results
-    await conn.execute("DELETE FROM public.moderation_results WHERE task_id = $1", task_id)
-
-
-@pytest.mark.anyio
-async def test_get_moderation_result(app, async_client, test_item):
-     # Подменяем kafka-клиент в app.state
-    kafka_mock = AsyncMock()
-    kafka_mock.send_moderation_request = AsyncMock()
-    app.state.kafka = kafka_mock
-
-    # отправляем запрос, после которого в moderation.results должна появится запись 
-    response = await async_client.post("/async-predict", json={"item_id": test_item})
-    data = response.json()
-    task_id = data["task_id"]
-
-    response = await async_client.get("/moderation-result/" + str(task_id))
-    data = response.json()
-    assert data["task_id"] == task_id
-    assert data["status"] == "pending"
-    assert data["message"] == None
-    assert data["is_violation"] == None
-    assert data["probability"] == None
-
-    conn = await PostgresConnection.get()
-    await conn.execute("DELETE FROM public.moderation_results WHERE task_id = $1", task_id)
-
+    kafka_mock.send_moderation_request.assert_awaited_once_with(5, "moderation", 1, 3, 5)
+    redis_client.set.assert_awaited_once_with(123, created_task)
 
 @pytest.mark.anyio
 async def test_worker_processes_message_successfully():

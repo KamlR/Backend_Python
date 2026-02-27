@@ -8,6 +8,8 @@ from services.moderation import ModerationService
 from schemas.predict import SimplePredictAdvIn
 from repositories.moderation_results import ModerationResultRepository
 from app.clients.kafka import KafkaClient
+import redis.asyncio as redis
+from repositories.redis_storage import RedisPredictionStorage
 
 class ModerationConsumer:
     def __init__(self, server, mainTopic, retryTopic, moderationService,  moderationResultRepository, kafkaClient):
@@ -53,12 +55,22 @@ class ModerationConsumer:
         finally:
             await self.stop()
 
+async def connect_to_redis():
+    redis_client = redis.Redis(
+    host="localhost",
+    port=6379,
+    decode_responses=True)
+    return redis_client
 
 async def main() -> None:
     model = None
     while model is None:
         model = load_model()
-    moderationService = ModerationService(model)
+        
+    redis_client = await connect_to_redis()
+    redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
+
+    moderationService = ModerationService(model, redisPredictionStorage)
     moderationResultRepository = ModerationResultRepository()
     kafkaClient = KafkaClient("localhost:9092")
     await kafkaClient.start()

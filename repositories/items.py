@@ -51,6 +51,20 @@ class ItemRepository:
       """
       result = await conn.fetchval(query, item_id)
       return bool(result)
+    
+    async def delete_item(self, item_id: int) -> bool:
+      conn = await PostgresConnection.get()
+
+      query = """
+        DELETE FROM public.items
+        WHERE item_id = $1
+        RETURNING item_id;
+        """
+
+      result = await conn.fetchrow(query, item_id)
+      return result is not None
+  
+
 
    
     

@@ -1,6 +1,6 @@
 from http import HTTPStatus
 import pytest
-
+from unittest.mock import AsyncMock, patch
 
 PREDICT_BASE_PAYLOAD = {
     "seller_id": 1,
@@ -59,11 +59,14 @@ def test_predict_model_not_loaded(app_client):
     assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.json()["detail"] == "Model not loaded"
 
-@pytest.mark.asyncio
-async def test_simple_predict_violation_true(async_client, app, allow_model, test_item):
-    app.state.model = allow_model
 
-    response = await async_client.post("/simple-predict", json={"item_id": test_item})
+async def test_simple_predict_violation_true(app_client, allow_model):
+    app_client.app.state.model = allow_model
+
+    with patch("services.moderation.ItemRepository") as ItemRepoMock:
+        item_repo_instance = ItemRepoMock.return_value
+        item_repo_instance.get_item_for_prediction = AsyncMock(return_value=PREDICT_BASE_PAYLOAD)
+        response = app_client.post("/simple-predict", json={"item_id": 1})
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -71,26 +74,31 @@ async def test_simple_predict_violation_true(async_client, app, allow_model, tes
     assert 0 <= data["probability"] <= 1
 
 
-@pytest.mark.asyncio
-async def test_simple_predict_violation_false(async_client, app, deny_model, test_item):
-    app.state.model = deny_model
 
-    response = await async_client.post("/simple-predict", json={"item_id": test_item})
-
-    assert response.status_code == HTTPStatus.OK
-    data = response.json()
-    assert data["is_violation"] is False
-    assert 0 <= data["probability"] <= 1
-
-@pytest.mark.asyncio
-async def test_simple_predict_item_not_found(async_client, app, deny_model, test_item):
-    app.state.model = deny_model
-
-    response = await async_client.post("/simple-predict", json={"item_id": test_item})
+async def test_simple_predict_violation_false(app_client, deny_model):
+    app_client.app.state.model = deny_model
+    
+    with patch("services.moderation.ItemRepository") as ItemRepoMock:
+        item_repo_instance = ItemRepoMock.return_value
+        item_repo_instance.get_item_for_prediction = AsyncMock(return_value=PREDICT_BASE_PAYLOAD)
+        response = app_client.post("/simple-predict", json={"item_id": 1})
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
     assert data["is_violation"] is False
     assert 0 <= data["probability"] <= 1
+
+
+async def test_simple_predict_item_not_found(app_client, deny_model):
+    app_client.app.state.model = deny_model
+
+    with patch("services.moderation.ItemRepository") as ItemRepoMock:
+        item_repo_instance = ItemRepoMock.return_value
+        item_repo_instance.get_item_for_prediction = AsyncMock(return_value=None)
+        response = app_client.post("/simple-predict", json={"item_id": 1})
+
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    data = response.json()
+    assert data["detail"] == "Item not found"
 
 

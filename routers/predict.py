@@ -3,6 +3,8 @@ from schemas.predict import PredictAdvIn, SimplePredictAdvIn, PredictAdvOut, Asy
 from services.moderation import ModerationService
 from services.async_moderation import AsyncModerationService
 from services.exceptions import ItemNotFoundError
+from repositories.redis_storage import RedisPredictionStorage
+from repositories.redis_storage import RedisPredictionStorage
 
 import traceback
 
@@ -17,13 +19,15 @@ predict_router = APIRouter()
 async def predict(dto: PredictAdvIn, request: Request) -> PredictAdvOut:
   try:
       model = request.app.state.model
+      redis_client = request.app.state.redis_client
+      redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
       if model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model not loaded",
         )
 
-      service = ModerationService(model)
+      service = ModerationService(model, redisPredictionStorage)
       is_violation, probability = await service.predict(dto)
 
       return PredictAdvOut(
@@ -48,13 +52,15 @@ async def predict(dto: PredictAdvIn, request: Request) -> PredictAdvOut:
 async def simple_predict(dto: SimplePredictAdvIn, request: Request) ->  PredictAdvOut:
     try:
       model = request.app.state.model
+      redis_client = request.app.state.redis_client
+      redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
       if model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model not loaded",
         )
 
-      service = ModerationService(model)
+      service = ModerationService(model, redisPredictionStorage)
       is_violation, probability = await service.simplePredict(dto)
 
       return PredictAdvOut(
@@ -82,7 +88,8 @@ async def simple_predict(dto: SimplePredictAdvIn, request: Request) ->  PredictA
     status_code=status.HTTP_200_OK,
 )
 async def async_predict(dto: SimplePredictAdvIn, request: Request) -> AsyncPredictAdvOut:
-    asyncModerationService = AsyncModerationService(request.app.state.kafka)
+    redisPredictionStorage = RedisPredictionStorage(request.app.state.redis_client, "async_prediction", 5)
+    asyncModerationService = AsyncModerationService(redisPredictionStorage, request.app.state.kafka)
     try:
         task_id = await asyncModerationService.prepare_data_for_moderation(dto.item_id)
         return AsyncPredictAdvOut(task_id=task_id, status="pending", message="Moderation request accepted")
@@ -104,7 +111,8 @@ async def async_predict(dto: SimplePredictAdvIn, request: Request) -> AsyncPredi
     status_code=status.HTTP_200_OK,
 )
 async def get_moderation_result(task_id: int, request: Request) -> ModerationResultOut:
-    asyncModerationService = AsyncModerationService()
+    redisPredictionStorage = RedisPredictionStorage(request.app.state.redis_client, "async_prediction", 15)
+    asyncModerationService = AsyncModerationService(redisPredictionStorage)
     try:
        task_id, task_status, is_violation, probability, error_message = await asyncModerationService.get_moderation_result(task_id)
        return  ModerationResultOut(task_id=task_id, status=task_status, message=error_message, is_violation=is_violation, probability=probability)
@@ -118,4 +126,25 @@ async def get_moderation_result(task_id: int, request: Request) -> ModerationRes
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Prediction failed"
+        )
+
+@predict_router.delete(
+    "/close/{item_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def close_item(item_id: int, request: Request) -> None:
+    try:
+       redis_client = request.app.state.redis_client
+       redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
+       service = ModerationService(request.app.state.model, redisPredictionStorage)
+       await service.closeItem(item_id)
+    except ItemNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Item not found",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Close item failed"
         )

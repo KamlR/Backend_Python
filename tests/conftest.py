@@ -4,6 +4,14 @@ from httpx import AsyncClient, ASGITransport
 
 from db.connection import PostgresConnection
 from main import app as fastapi_app
+import fakeredis.aioredis
+
+@pytest.fixture
+async def redis_client():
+    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    yield r
+    await r.flushall()
+    await r.close()
 
 
 class FakeModel:
