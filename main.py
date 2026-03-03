@@ -7,14 +7,28 @@ import logging
 from app.clients.kafka import KafkaClient
 from db.connection import PostgresConnection
 import redis.asyncio as redis
+from middleware import PrometheusMiddleware
+from starlette.responses import Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+import os, sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from dotenv import load_dotenv
 
+load_dotenv()
+
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    integrations=[FastApiIntegration()],
+    traces_sample_rate=1.0,
+    environment="development",
+)
 
 def run_migrations():
     subprocess.run(
     ["pgmigrate", "-d", "db/migrations", "-t", "latest", "migrate"],
     check=True
 )
-    
+
 async def start_kafka():
     kafka = KafkaClient("localhost:9092")
     await kafka.start()
@@ -71,7 +85,16 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 async def root():
     return {"message": "Moderation service is running"}
+app.add_middleware(PrometheusMiddleware)
 
+@app.get("/metrics")
+async def metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.get("/sentry-debug")
+async def trigger_error():
+    1 / 0
+    
 app.include_router(predict_router)
 
 logging.basicConfig(

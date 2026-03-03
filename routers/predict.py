@@ -5,8 +5,8 @@ from services.async_moderation import AsyncModerationService
 from services.exceptions import ItemNotFoundError
 from repositories.redis_storage import RedisPredictionStorage
 from repositories.redis_storage import RedisPredictionStorage
-
-import traceback
+from app.metrics.metrics import PREDICTION_ERRORS_TOTAL 
+import traceback, sentry_sdk
 
 predict_router = APIRouter()
 
@@ -22,6 +22,7 @@ async def predict(dto: PredictAdvIn, request: Request) -> PredictAdvOut:
       redis_client = request.app.state.redis_client
       redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
       if model is None:
+        PREDICTION_ERRORS_TOTAL.labels(result="model_unavailable").inc()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model not loaded",
@@ -37,7 +38,9 @@ async def predict(dto: PredictAdvIn, request: Request) -> PredictAdvOut:
   
   except HTTPException:
     raise
-  except Exception:
+  except Exception as e:
+    sentry_sdk.capture_exception(e)
+    PREDICTION_ERRORS_TOTAL.labels(error_type="prediction_error").inc()
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Prediction failed",
@@ -55,6 +58,7 @@ async def simple_predict(dto: SimplePredictAdvIn, request: Request) ->  PredictA
       redis_client = request.app.state.redis_client
       redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
       if model is None:
+        PREDICTION_ERRORS_TOTAL.labels(error_type="model_unavailable").inc()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model not loaded",
@@ -68,14 +72,18 @@ async def simple_predict(dto: SimplePredictAdvIn, request: Request) ->  PredictA
           probability=probability,
       )
 
-    except ItemNotFoundError:
+    except ItemNotFoundError as e:
+        sentry_sdk.capture_exception(e)
+        PREDICTION_ERRORS_TOTAL.labels(error_type="prediction_error").inc()
         raise HTTPException(
             status_code=404,
             detail="Item not found",
         )
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        PREDICTION_ERRORS_TOTAL.labels(error_type="prediction_error").inc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Prediction failed",
@@ -93,12 +101,14 @@ async def async_predict(dto: SimplePredictAdvIn, request: Request) -> AsyncPredi
     try:
         task_id = await asyncModerationService.prepare_data_for_moderation(dto.item_id)
         return AsyncPredictAdvOut(task_id=task_id, status="pending", message="Moderation request accepted")
-    except ItemNotFoundError:
+    except ItemNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=404,
             detail="Item not found",
         )
-    except Exception:
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Prediction failed"
@@ -116,13 +126,14 @@ async def get_moderation_result(task_id: int, request: Request) -> ModerationRes
     try:
        task_id, task_status, is_violation, probability, error_message = await asyncModerationService.get_moderation_result(task_id)
        return  ModerationResultOut(task_id=task_id, status=task_status, message=error_message, is_violation=is_violation, probability=probability)
-    except ItemNotFoundError:
+    except ItemNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=404,
             detail="Item not found",
         )
     except Exception as e:
-        traceback.print_exc()
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Prediction failed"
@@ -138,12 +149,14 @@ async def close_item(item_id: int, request: Request) -> None:
        redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
        service = ModerationService(request.app.state.model, redisPredictionStorage)
        await service.closeItem(item_id)
-    except ItemNotFoundError:
+    except ItemNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=404,
             detail="Item not found",
         )
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Close item failed"

@@ -3,7 +3,8 @@ from schemas.predict import PredictAdvIn, SimplePredictAdvIn
 from repositories.items import ItemRepository
 from repositories.moderation_results import ModerationResultRepository
 from services.exceptions import ItemNotFoundError
-
+from app.metrics.metrics import PREDICTIONS_TOTAL, PREDICTION_DURATION_SECONDS, MODEL_PREDICTION_PROBABILITY
+import time
 import numpy as np
 import logging
 
@@ -32,10 +33,23 @@ class ModerationService:
                 "cache_result seller_id=%s item_id=%s is_violation=%s probability=%.4f",
                 data.seller_id, data.item_id, is_violation, proba
             )
+            # метрика PREDICTIONS_TOTAL
+            result_label = "violation" if is_violation else "no_violation"
+            PREDICTIONS_TOTAL.labels(result=result_label).inc()
+
+            # метрика MODEL_PREDICTION_PROBABILITY
+            MODEL_PREDICTION_PROBABILITY.observe(proba)
+
             return is_violation, proba
 
         features = self._to_features(data)
+
+        # метрика PREDICTION_DURATION_SECONDS, только inference
+        start_time = time.perf_counter()
         proba = float(self.model.predict_proba(features)[0][1])
+        inference_duration = time.perf_counter() - start_time
+        PREDICTION_DURATION_SECONDS.observe(inference_duration)
+
         is_violation = proba >= 0.5
         logger.info(
             "result seller_id=%s item_id=%s is_violation=%s probability=%.4f",
@@ -45,7 +59,14 @@ class ModerationService:
             proba,
         )
         payload = {"is_violation": is_violation, "proba": proba}
-        await self.redisPredictionStorage.set(data.item_id, payload)
+        #await self.redisPredictionStorage.set(data.item_id, payload)
+
+        # метрика PREDICTIONS_TOTAL
+        result_label = "violation" if is_violation else "no_violation"
+        PREDICTIONS_TOTAL.labels(result=result_label).inc()
+
+        # метрика MODEL_PREDICTION_PROBABILITY
+        MODEL_PREDICTION_PROBABILITY.observe(proba)
         return is_violation, proba
     
     async def predict(self, data: PredictAdvIn) -> tuple[bool, float]:

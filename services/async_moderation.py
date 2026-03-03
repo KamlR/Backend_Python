@@ -1,7 +1,6 @@
 from repositories.items import ItemRepository
 from repositories.moderation_results import ModerationResultRepository
 from services.exceptions import ItemNotFoundError
-import traceback
 
 class AsyncModerationService:
   def __init__(self, redisPredictionStorage, kafka=None):
@@ -15,14 +14,9 @@ class AsyncModerationService:
       raise ItemNotFoundError
     
     created_task = await moderestionResultRepo.create_moderation_result(item_id)
-    try:
-      await self.redisPredictionStorage.set(created_task["task_id"], created_task)
-    except Exception as e:
-      print(e)
-    try:
-      await self.kafka.send_moderation_request(item_id, "moderation", 1, 3, 5)
-    except Exception as e:
-        traceback.print_exc()
+    await self.redisPredictionStorage.set(created_task["task_id"], created_task)
+    await self.kafka.send_moderation_request(item_id, "moderation", 1, 3, 5)
+
         
     return created_task["task_id"]
   
