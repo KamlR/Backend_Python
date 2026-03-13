@@ -1,10 +1,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
-
+import uuid
+import pytest_asyncio
 from db.connection import PostgresConnection
 from main import app as fastapi_app
 import fakeredis.aioredis
+from repositories.account import AccountRepository
 
 @pytest.fixture
 async def redis_client():
@@ -74,4 +76,30 @@ async def test_item():
 
     await conn.execute("DELETE FROM public.items WHERE item_id = $1", item_id)
     await conn.execute("DELETE FROM public.users WHERE seller_id = $1", seller_id)
+    await conn.close()
+
+
+@pytest_asyncio.fixture
+async def test_account():
+    conn = await PostgresConnection.get()
+
+    login = f"test_login_{uuid.uuid4().hex}"
+    password = "test_password"
+    hashed_password = AccountRepository.hash_password(password)
+
+    account_id = await conn.fetchval("""
+        INSERT INTO public.account (login, password, is_blocked)
+        VALUES ($1, $2, FALSE)
+        RETURNING id
+    """, login, hashed_password)
+
+    yield {
+        "id": account_id,
+        "login": login,
+        "password": password,
+        "hashed_password": hashed_password,
+        "is_blocked": False,
+    }
+
+    await conn.execute("DELETE FROM public.account WHERE id = $1", account_id)
     await conn.close()

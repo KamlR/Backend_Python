@@ -1,6 +1,6 @@
 from repositories.items import ItemRepository
 from repositories.moderation_results import ModerationResultRepository
-from services.exceptions import ItemNotFoundError
+from errors.item_exceptions import ItemNotFoundError
 
 class AsyncModerationService:
   def __init__(self, redisPredictionStorage, kafka=None):

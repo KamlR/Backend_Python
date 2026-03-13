@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from schemas.predict import PredictAdvIn, SimplePredictAdvIn
 from repositories.items import ItemRepository
 from repositories.moderation_results import ModerationResultRepository
-from services.exceptions import ItemNotFoundError
+from errors.item_exceptions import ItemNotFoundError
 from app.metrics.metrics import PREDICTIONS_TOTAL, PREDICTION_DURATION_SECONDS, MODEL_PREDICTION_PROBABILITY
 import time
 import numpy as np

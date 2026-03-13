@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException, status, Request
+from fastapi import APIRouter, HTTPException, status, Request, Depends
 from schemas.predict import PredictAdvIn, SimplePredictAdvIn, PredictAdvOut, AsyncPredictAdvOut, ModerationResultOut
 from services.moderation import ModerationService
 from services.async_moderation import AsyncModerationService
-from services.exceptions import ItemNotFoundError
+from errors.item_exceptions import ItemNotFoundError
 from repositories.redis_storage import RedisPredictionStorage
 from repositories.redis_storage import RedisPredictionStorage
 from app.metrics.metrics import PREDICTION_ERRORS_TOTAL 
-import traceback, sentry_sdk
+from dependencies.auth import get_current_account
+import sentry_sdk
 
 predict_router = APIRouter()
 
@@ -16,7 +17,7 @@ predict_router = APIRouter()
     response_model=PredictAdvOut,
     status_code=status.HTTP_200_OK,
 )
-async def predict(dto: PredictAdvIn, request: Request) -> PredictAdvOut:
+async def predict(dto: PredictAdvIn, request: Request, current_account: dict = Depends(get_current_account)) -> PredictAdvOut:
   try:
       model = request.app.state.model
       redis_client = request.app.state.redis_client
@@ -52,7 +53,7 @@ async def predict(dto: PredictAdvIn, request: Request) -> PredictAdvOut:
     response_model=PredictAdvOut,
     status_code=status.HTTP_200_OK,
 )
-async def simple_predict(dto: SimplePredictAdvIn, request: Request) ->  PredictAdvOut:
+async def simple_predict(dto: SimplePredictAdvIn, request: Request, current_account: dict = Depends(get_current_account)) ->  PredictAdvOut:
     try:
       model = request.app.state.model
       redis_client = request.app.state.redis_client
@@ -95,7 +96,7 @@ async def simple_predict(dto: SimplePredictAdvIn, request: Request) ->  PredictA
     response_model=AsyncPredictAdvOut,
     status_code=status.HTTP_200_OK,
 )
-async def async_predict(dto: SimplePredictAdvIn, request: Request) -> AsyncPredictAdvOut:
+async def async_predict(dto: SimplePredictAdvIn, request: Request, current_account: dict = Depends(get_current_account)) -> AsyncPredictAdvOut:
     redisPredictionStorage = RedisPredictionStorage(request.app.state.redis_client, "async_prediction", 5)
     asyncModerationService = AsyncModerationService(redisPredictionStorage, request.app.state.kafka)
     try:
@@ -120,7 +121,7 @@ async def async_predict(dto: SimplePredictAdvIn, request: Request) -> AsyncPredi
     response_model=ModerationResultOut,
     status_code=status.HTTP_200_OK,
 )
-async def get_moderation_result(task_id: int, request: Request) -> ModerationResultOut:
+async def get_moderation_result(task_id: int, request: Request, current_account: dict = Depends(get_current_account)) -> ModerationResultOut:
     redisPredictionStorage = RedisPredictionStorage(request.app.state.redis_client, "async_prediction", 15)
     asyncModerationService = AsyncModerationService(redisPredictionStorage)
     try:
@@ -143,7 +144,7 @@ async def get_moderation_result(task_id: int, request: Request) -> ModerationRes
     "/close/{item_id}",
     status_code=status.HTTP_200_OK,
 )
-async def close_item(item_id: int, request: Request) -> None:
+async def close_item(item_id: int, request: Request, current_account: dict = Depends(get_current_account)) -> None:
     try:
        redis_client = request.app.state.redis_client
        redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)

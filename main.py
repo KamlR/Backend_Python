@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 import subprocess
 from routers.predict import predict_router
+from routers.auth import auth_router
 from contextlib import asynccontextmanager
 from model import train_model, save_model, load_model
 import logging
@@ -96,6 +97,7 @@ async def trigger_error():
     1 / 0
     
 app.include_router(predict_router)
+app.include_router(auth_router)
 
 logging.basicConfig(
     level=logging.INFO,
