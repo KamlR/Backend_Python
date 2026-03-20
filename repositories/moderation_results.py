@@ -1,13 +1,18 @@
 from typing import Any, Optional
-import time
 
 from db.connection import PostgresConnection
-from app.metrics.metrics import DB_QUERY_DURATION_SECONDS
+from repositories.constants import (
+    DB_QUERY_DELETE,
+    DB_QUERY_INSERT,
+    DB_QUERY_SELECT,
+    DB_QUERY_UPDATE,
+)
+from repositories.metrics_context_manager import measure_db_query
 
 
 class ModerationResultRepository:
     async def create_moderation_result(self, item_id: int) -> Optional[dict[str, Any]]:
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
         query = """
         INSERT INTO public.moderation_results (
@@ -22,11 +27,9 @@ class ModerationResultRepository:
                   error_message;
         """
 
-        start = time.perf_counter()
-        row = await conn.fetchrow(query, item_id)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="insert").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_INSERT):
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, item_id)
 
         return dict(row)
 
@@ -37,13 +40,11 @@ class ModerationResultRepository:
         WHERE task_id = $1
         """
 
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
-        start = time.perf_counter()
-        row = await conn.fetchrow(query, task_id)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="select").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_SELECT):
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, task_id)
 
         return dict(row) if row else None
 
@@ -66,16 +67,14 @@ class ModerationResultRepository:
         WHERE item_id = $1
         """
 
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
-        start = time.perf_counter()
-        await conn.fetchrow(query, item_id, is_violation, proba, status, error_message)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="update").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_UPDATE):
+            async with pool.acquire() as conn:
+                await conn.fetchrow(query, item_id, is_violation, proba, status, error_message)
 
     async def get_task_status(self, item_id: int) -> tuple[bool, str | None]:
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
         query = """
         SELECT status
@@ -84,16 +83,14 @@ class ModerationResultRepository:
         LIMIT 1;
         """
 
-        start = time.perf_counter()
-        status = await conn.fetchval(query, item_id)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="select").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_SELECT):
+            async with pool.acquire() as conn:
+                status = await conn.fetchval(query, item_id)
 
         return status is not None, status
 
     async def delete_task(self, item_id: int) -> int | None:
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
         query = """
         DELETE FROM public.moderation_results
@@ -101,10 +98,8 @@ class ModerationResultRepository:
         RETURNING task_id;
         """
 
-        start = time.perf_counter()
-        task_id = await conn.fetchval(query, item_id)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="delete").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_DELETE):
+            async with pool.acquire() as conn:
+                task_id = await conn.fetchval(query, item_id)
 
         return task_id

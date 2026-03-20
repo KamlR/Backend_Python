@@ -15,22 +15,28 @@ PREDICT_BASE_PAYLOAD = {
 
 def test_predict_violation_true(app_client, allow_model):
     app_client.app.state.model = allow_model
+    app_client.app.state.redis_client = MagicMock()
 
-    response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
+    with patch("routers.predict.ModerationService") as ServiceMock:
+        ServiceMock.return_value.predict = AsyncMock(return_value=(True, 0.8))
+
+        response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
 
     assert response.status_code == HTTPStatus.OK
-
     data = response.json()
     assert data["is_violation"] is True
     assert 0 <= data["probability"] <= 1
 
 def test_predict_violation_false(app_client, deny_model):
     app_client.app.state.model = deny_model
+    app_client.app.state.redis_client = MagicMock()
 
-    response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
+    with patch("routers.predict.ModerationService") as ServiceMock:
+        ServiceMock.return_value.predict = AsyncMock(return_value=(False, 0.8))
+
+        response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
 
     assert response.status_code == HTTPStatus.OK
-
     data = response.json()
     assert data["is_violation"] is False
     assert 0 <= data["probability"] <= 1
@@ -53,6 +59,7 @@ def test_predict_validation_wrong_type(app_client):
 
 def test_predict_model_not_loaded(app_client):
     app_client.app.state.model = None
+    app_client.app.state.redis_client = MagicMock()
 
     response = app_client.post("/predict", json=PREDICT_BASE_PAYLOAD)
 
@@ -60,13 +67,14 @@ def test_predict_model_not_loaded(app_client):
     assert response.json()["detail"] == "Model not loaded"
 
 
-async def test_simple_predict_violation_true(app_client, allow_model):
+def test_simple_predict_violation_true(app_client, allow_model):
     app_client.app.state.model = allow_model
+    app_client.app.state.redis_client = MagicMock()
 
-    with patch("services.moderation.ItemRepository") as ItemRepoMock:
-        item_repo_instance = ItemRepoMock.return_value
-        item_repo_instance.get_item_for_prediction = AsyncMock(return_value=PREDICT_BASE_PAYLOAD)
-        response = app_client.post("/simple-predict", json={"item_id": 1})
+    with patch("routers.predict.ModerationService") as ServiceMock:
+        ServiceMock.return_value.simplePredict = AsyncMock(return_value=(True, 0.8))
+
+        response = app_client.post("/simple-predict", json=PREDICT_BASE_PAYLOAD)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -75,13 +83,14 @@ async def test_simple_predict_violation_true(app_client, allow_model):
 
 
 
-async def test_simple_predict_violation_false(app_client, deny_model):
+def test_simple_predict_violation_false(app_client, deny_model):
     app_client.app.state.model = deny_model
-    
-    with patch("services.moderation.ItemRepository") as ItemRepoMock:
-        item_repo_instance = ItemRepoMock.return_value
-        item_repo_instance.get_item_for_prediction = AsyncMock(return_value=PREDICT_BASE_PAYLOAD)
-        response = app_client.post("/simple-predict", json={"item_id": 1})
+    app_client.app.state.redis_client = MagicMock()
+
+    with patch("routers.predict.ModerationService") as ServiceMock:
+        ServiceMock.return_value.simplePredict = AsyncMock(return_value=(False, 0.8))
+
+        response = app_client.post("/simple-predict", json=PREDICT_BASE_PAYLOAD)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -89,7 +98,7 @@ async def test_simple_predict_violation_false(app_client, deny_model):
     assert 0 <= data["probability"] <= 1
 
 
-async def test_simple_predict_item_not_found(app_client, deny_model):
+def test_simple_predict_item_not_found(app_client, deny_model):
     app_client.app.state.model = deny_model
 
     with patch("services.moderation.ItemRepository") as ItemRepoMock:
@@ -117,7 +126,7 @@ async def test_close_item_ok_without_async_task(async_client, allow_model):
     # Мокаем ItemRepository и ModerationResultRepository в модуле services.moderation
     with patch("services.moderation.ItemRepository") as ItemRepoMock, \
          patch("services.moderation.ModerationResultRepository") as ModerRepoMock, \
-         patch("services.moderation.RedisPredictionStorage") as StorageMock:
+         patch("routers.predict.RedisPredictionStorage") as StorageMock:
 
         # itemRepository.delete_item -> True
         ItemRepoMock.return_value.delete_item = AsyncMock(return_value=True)
@@ -156,7 +165,7 @@ async def test_close_item_ok_with_async_task_deleted(async_client, allow_model):
 
     with patch("services.moderation.ItemRepository") as ItemRepoMock, \
          patch("services.moderation.ModerationResultRepository") as ModerRepoMock, \
-         patch("services.moderation.RedisPredictionStorage") as StorageMock:
+         patch("routers.predict.RedisPredictionStorage") as StorageMock:
 
         ItemRepoMock.return_value.delete_item = AsyncMock(return_value=True)
         ModerRepoMock.return_value.delete_task = AsyncMock(return_value=777)
@@ -190,7 +199,7 @@ async def test_close_item_not_found(async_client, allow_model):
     async_client._transport.app.state.redis_client = redis_mock
 
     with patch("services.moderation.ItemRepository") as ItemRepoMock, \
-         patch("services.moderation.RedisPredictionStorage") as StorageMock:
+         patch("routers.predict.RedisPredictionStorage") as StorageMock:
 
         ItemRepoMock.return_value.delete_item = AsyncMock(return_value=False)
 

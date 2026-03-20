@@ -66,6 +66,22 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+  
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5001
+      --backend-store-uri sqlite:///mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    ports:
+      - "5001:5001"
+    volumes:
+      - mlflow_data:/mlflow
+    restart: always
 
 volumes:
   postgres_data:
+  mlflow_data:

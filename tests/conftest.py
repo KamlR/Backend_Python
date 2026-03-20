@@ -1,19 +1,15 @@
-import pytest
-from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
 import uuid
+
+import fakeredis.aioredis
+import pytest
 import pytest_asyncio
+from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+
 from db.connection import PostgresConnection
 from main import app as fastapi_app
-import fakeredis.aioredis
 from repositories.account import AccountRepository
-
-@pytest.fixture
-async def redis_client():
-    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    yield r
-    await r.flushall()
-    await r.close()
+from dependencies.auth import get_current_account
 
 
 class FakeModel:
@@ -23,18 +19,35 @@ class FakeModel:
     def predict_proba(self, X):
         return [[1 - self.probability, self.probability]]
 
+
+@pytest_asyncio.fixture
+async def redis_client():
+    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    yield r
+    await r.flushall()
+    await r.aclose()
+
+
 @pytest.fixture
 def app():
-    return fastapi_app
+    async def override_get_current_account():
+        return {
+            "id": 1,
+            "login": "test_user",
+            "is_blocked": False,
+        }
 
-# для синхронных тестов
+    fastapi_app.dependency_overrides[get_current_account] = override_get_current_account
+    yield fastapi_app
+    fastapi_app.dependency_overrides.clear()
+
+
 @pytest.fixture
 def app_client(app):
     return TestClient(app)
 
 
-# для async тестов
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -43,55 +56,72 @@ async def async_client(app):
 
 @pytest.fixture
 def allow_model():
-    return FakeModel(probability=0.8)  # нарушение = True
+    return FakeModel(probability=0.8)
 
 
 @pytest.fixture
 def deny_model():
-    return FakeModel(probability=0.1)  # нарушение = False
-
-
-@pytest.fixture
-async def test_item():
-    conn = await PostgresConnection.get()
-
-    # создаём юзера
-    seller_id = await conn.fetchval("""
-        INSERT INTO public.users (first_name, last_name, is_verified_seller)
-        VALUES ('Test', 'User', TRUE)
-        RETURNING seller_id
-    """)
-
-    # создаём item
-    item_id = await conn.fetchval("""
-        INSERT INTO public.items
-            (seller_id, name, description, category, images_qty)
-        VALUES
-            ($1, 'Bad item', 'spam text', 10, 2)
-        RETURNING item_id
-    """, seller_id)
-
-    yield item_id   
-
-
-    await conn.execute("DELETE FROM public.items WHERE item_id = $1", item_id)
-    await conn.execute("DELETE FROM public.users WHERE seller_id = $1", seller_id)
-    await conn.close()
+    return FakeModel(probability=0.1)
 
 
 @pytest_asyncio.fixture
-async def test_account():
-    conn = await PostgresConnection.get()
+async def db_pool():
+    pool = await PostgresConnection.create_pool()
+    yield pool
+    await PostgresConnection.close_pool()
 
+
+@pytest_asyncio.fixture
+async def test_item(db_pool):
+    async with db_pool.acquire() as conn:
+        seller_id = await conn.fetchval(
+            """
+            INSERT INTO public.users (first_name, last_name, is_verified_seller)
+            VALUES ('Test', 'User', TRUE)
+            RETURNING seller_id
+            """
+        )
+
+        item_id = await conn.fetchval(
+            """
+            INSERT INTO public.items
+                (seller_id, name, description, category, images_qty)
+            VALUES
+                ($1, 'Bad item', 'spam text', 10, 2)
+            RETURNING item_id
+            """,
+            seller_id,
+        )
+
+    yield item_id
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM public.items WHERE item_id = $1",
+            item_id,
+        )
+        await conn.execute(
+            "DELETE FROM public.users WHERE seller_id = $1",
+            seller_id,
+        )
+
+
+@pytest_asyncio.fixture
+async def test_account(db_pool):
     login = f"test_login_{uuid.uuid4().hex}"
     password = "test_password"
     hashed_password = AccountRepository.hash_password(password)
 
-    account_id = await conn.fetchval("""
-        INSERT INTO public.account (login, password, is_blocked)
-        VALUES ($1, $2, FALSE)
-        RETURNING id
-    """, login, hashed_password)
+    async with db_pool.acquire() as conn:
+        account_id = await conn.fetchval(
+            """
+            INSERT INTO public.account (login, password, is_blocked)
+            VALUES ($1, $2, FALSE)
+            RETURNING id
+            """,
+            login,
+            hashed_password,
+        )
 
     yield {
         "id": account_id,
@@ -101,5 +131,8 @@ async def test_account():
         "is_blocked": False,
     }
 
-    await conn.execute("DELETE FROM public.account WHERE id = $1", account_id)
-    await conn.close()
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM public.account WHERE id = $1",
+            account_id,
+        )

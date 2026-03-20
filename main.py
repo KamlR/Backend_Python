@@ -3,7 +3,7 @@ import subprocess
 from routers.predict import predict_router
 from routers.auth import auth_router
 from contextlib import asynccontextmanager
-from model import train_model, save_model, load_model
+from model import get_model
 import logging
 from app.clients.kafka import KafkaClient
 from db.connection import PostgresConnection
@@ -52,6 +52,11 @@ async def lifespan(app: FastAPI):
     run_migrations()
     print("✅ Migrations completed")
 
+    # Создание пула соединений к бд.
+    print("🔧 Creating postgres pool...")
+    pool = await PostgresConnection.create_pool()
+    print("✅ Postgres pool created")
+
      # Брокер сообщений.
     print("🔧 Starting kafka service...")
     await start_kafka()
@@ -63,20 +68,15 @@ async def lifespan(app: FastAPI):
     print("✅ Successfully connected to redis")
 
     # Работа с моделью.
-    model = load_model()
+    model = get_model()
     if model is None:
-        print("📚 No model found. Training new model...")
-        model = train_model()
-        save_model(model)
-        print("✅ Model trained and saved")
-    else:
-        print("✅ Model loaded from disk")
+        raise RuntimeError("❌ Model not found. Please run training pipeline first.")
+    print("✅ Model loaded from disk")
     app.state.model = model
 
     yield
 
-    conn = await PostgresConnection.get()
-    await conn.close()
+    await PostgresConnection.close_pool()
     await app.state.kafka.stop()
     print("🛑 Shutting down service...")
 

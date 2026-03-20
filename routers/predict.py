@@ -23,7 +23,7 @@ async def predict(dto: PredictAdvIn, request: Request, current_account: dict = D
       redis_client = request.app.state.redis_client
       redisPredictionStorage = RedisPredictionStorage(redis_client, "prediction", 15)
       if model is None:
-        PREDICTION_ERRORS_TOTAL.labels(result="model_unavailable").inc()
+        PREDICTION_ERRORS_TOTAL.labels(error_type="model_unavailable").inc()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model not loaded",

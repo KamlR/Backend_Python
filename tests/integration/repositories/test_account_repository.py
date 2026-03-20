@@ -6,7 +6,7 @@ from db.connection import PostgresConnection
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_create_account():
+async def test_create_account(db_pool):
     repo = AccountRepository()
     login = "new_user"
     password = "123456"
@@ -15,15 +15,16 @@ async def test_create_account():
 
     assert isinstance(account_id, int)
 
-    conn = await PostgresConnection.get()
-    row = await conn.fetchrow(
-        """
-        SELECT id, login, password, is_blocked
-        FROM public.account
-        WHERE id = $1
-        """,
-        account_id,
-    )
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, login, password, is_blocked
+            FROM public.account
+            WHERE id = $1
+            """,
+            account_id,
+        )
 
     assert row is not None
     assert row["id"] == account_id
@@ -31,8 +32,11 @@ async def test_create_account():
     assert row["password"] == AccountRepository.hash_password(password)
     assert row["is_blocked"] is False
 
-    await conn.execute("DELETE FROM public.account WHERE id = $1", account_id)
-    await conn.close()
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM public.account WHERE id = $1",
+            account_id,
+        )
 
 
 @pytest.mark.asyncio
@@ -51,15 +55,12 @@ async def test_get_account_by_id(test_account):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_get_account_by_id_not_found():
+async def test_get_account_by_id_not_found(db_pool):
     repo = AccountRepository()
 
     result = await repo.get_account_by_id(999999)
 
     assert result is None
-
-    conn = await PostgresConnection.get()
-    await conn.close()
 
 
 @pytest.mark.asyncio
@@ -100,25 +101,25 @@ async def test_delete_account(test_account):
 
     assert result is True
 
-    conn = await PostgresConnection.get()
-    row = await conn.fetchrow(
-        "SELECT id FROM public.account WHERE id = $1",
-        test_account["id"],
-    )
+    pool = await PostgresConnection.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM public.account WHERE id = $1",
+            test_account["id"],
+        )
+
     assert row is None
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_account_not_found():
+async def test_delete_account_not_found(db_pool):
     repo = AccountRepository()
 
     result = await repo.delete_account(999999)
 
     assert result is False
 
-    conn = await PostgresConnection.get()
-    await conn.close()
 
 
 @pytest.mark.asyncio
@@ -130,24 +131,21 @@ async def test_block_account(test_account):
 
     assert result is True
 
-    conn = await PostgresConnection.get()
-    is_blocked = await conn.fetchval(
-        "SELECT is_blocked FROM public.account WHERE id = $1",
-        test_account["id"],
-    )
+    pool = await PostgresConnection.get_pool()
+    async with pool.acquire() as conn:
+        is_blocked = await conn.fetchval(
+            "SELECT is_blocked FROM public.account WHERE id = $1",
+            test_account["id"],
+        )
+
     assert is_blocked is True
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_block_account_not_found():
+async def test_block_account_not_found(db_pool):
     repo = AccountRepository()
 
     result = await repo.block_account(999999)
 
     assert result is False
-
-    conn = await PostgresConnection.get()
-    await conn.close()
-    
-

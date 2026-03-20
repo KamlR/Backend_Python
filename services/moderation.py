@@ -59,7 +59,7 @@ class ModerationService:
             proba,
         )
         payload = {"is_violation": is_violation, "proba": proba}
-        #await self.redisPredictionStorage.set(data.item_id, payload)
+        await self.redisPredictionStorage.set(data.item_id, payload)
 
         # метрика PREDICTIONS_TOTAL
         result_label = "violation" if is_violation else "no_violation"

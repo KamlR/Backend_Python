@@ -1,9 +1,9 @@
 from typing import Any, Optional
-import time
 
 from db.connection import PostgresConnection
 from schemas.item import ItemCreate
-from app.metrics.metrics import DB_QUERY_DURATION_SECONDS
+from repositories.constants import DB_QUERY_DELETE, DB_QUERY_INSERT, DB_QUERY_SELECT
+from repositories.metrics_context_manager import measure_db_query
 
 
 class ItemRepository:
@@ -25,13 +25,11 @@ class ItemRepository:
         WHERE i.item_id = $1
         """
 
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
-        start = time.perf_counter()
-        row = await conn.fetchrow(query, item_id)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="select").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_SELECT):
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, item_id)
 
         return dict(row) if row else None
 
@@ -39,7 +37,7 @@ class ItemRepository:
     Создание объявления.
     """
     async def create_item(self, item: ItemCreate) -> int:
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
         query = """
         INSERT INTO public.items (seller_id, name, description, category, images_qty)
@@ -47,23 +45,21 @@ class ItemRepository:
         RETURNING item_id
         """
 
-        start = time.perf_counter()
-        row = await conn.fetchrow(
-            query,
-            item.seller_id,
-            item.name,
-            item.description,
-            item.category,
-            item.images_qty,
-        )
-        DB_QUERY_DURATION_SECONDS.labels(query_type="insert").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_INSERT):
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    query,
+                    item.seller_id,
+                    item.name,
+                    item.description,
+                    item.category,
+                    item.images_qty,
+                )
 
         return int(row["item_id"])
 
     async def check_adv_existance(self, item_id: int) -> bool:
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
         query = """
         SELECT EXISTS (
@@ -73,16 +69,14 @@ class ItemRepository:
         );
         """
 
-        start = time.perf_counter()
-        result = await conn.fetchval(query, item_id)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="select").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_SELECT):
+            async with pool.acquire() as conn:
+                result = await conn.fetchval(query, item_id)
 
         return bool(result)
 
     async def delete_item(self, item_id: int) -> bool:
-        conn = await PostgresConnection.get()
+        pool = await PostgresConnection.get_pool()
 
         query = """
         DELETE FROM public.items
@@ -90,10 +84,8 @@ class ItemRepository:
         RETURNING item_id;
         """
 
-        start = time.perf_counter()
-        result = await conn.fetchrow(query, item_id)
-        DB_QUERY_DURATION_SECONDS.labels(query_type="delete").observe(
-            time.perf_counter() - start
-        )
+        async with measure_db_query(DB_QUERY_DELETE):
+            async with pool.acquire() as conn:
+                result = await conn.fetchrow(query, item_id)
 
         return result is not None

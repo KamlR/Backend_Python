@@ -8,9 +8,8 @@ from schemas.item import ItemCreate
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_user_inserts_row():
+async def test_create_user_inserts_row(db_pool):
     userRepo = UserRepository()
-    conn = await PostgresConnection.get()
 
     user = UserCreate(
         first_name="Repo",
@@ -21,15 +20,15 @@ async def test_create_user_inserts_row():
     seller_id = await userRepo.create_user(user)
     assert isinstance(seller_id, int)
     assert seller_id > 0
-
-    row = await conn.fetchrow(
-        """
-        SELECT seller_id, first_name, last_name, is_verified_seller
-        FROM public.users
-        WHERE seller_id = $1
-        """,
-        seller_id,
-    )
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT seller_id, first_name, last_name, is_verified_seller
+            FROM public.users
+            WHERE seller_id = $1
+            """,
+            seller_id,
+        )
 
     assert row is not None
     assert row["seller_id"] == seller_id
@@ -37,24 +36,23 @@ async def test_create_user_inserts_row():
     assert row["last_name"] == user.last_name
     assert row["is_verified_seller"] == user.is_verified_seller
 
-
-    await conn.execute("DELETE FROM public.users WHERE seller_id = $1", seller_id)
-    await conn.close()
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM public.users WHERE seller_id = $1", seller_id)
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_item_inserts_row_and_get_item_for_prediction():
+async def test_create_item_inserts_row_and_get_item_for_prediction(db_pool):
     itemRepo = ItemRepository()
-    conn = await PostgresConnection.get()
 
     # 1) подготовка: создаём продавца
-    seller_id = await conn.fetchval(
-        """
-        INSERT INTO public.users (first_name, last_name, is_verified_seller)
-        VALUES ('Item', 'Owner', TRUE)
-        RETURNING seller_id
-        """
-    )
+    async with db_pool.acquire() as conn:
+        seller_id = await conn.fetchval(
+            """
+            INSERT INTO public.users (first_name, last_name, is_verified_seller)
+            VALUES ('Item', 'Owner', TRUE)
+            RETURNING seller_id
+            """
+        )
 
     try:
         # 2) создаём item через репозиторий
@@ -69,16 +67,16 @@ async def test_create_item_inserts_row_and_get_item_for_prediction():
         item_id = await itemRepo.create_item(item)
         assert isinstance(item_id, int)
         assert item_id > 0
-
+        async with db_pool.acquire() as conn:
         # 3) проверяем, что запись реально появилась
-        row = await conn.fetchrow(
-            """
-            SELECT item_id, seller_id, name, description, category, images_qty
-            FROM public.items
-            WHERE item_id = $1
-            """,
-            item_id,
-        )
+            row = await conn.fetchrow(
+                """
+                SELECT item_id, seller_id, name, description, category, images_qty
+                FROM public.items
+                WHERE item_id = $1
+                """,
+                item_id,
+            )
         assert row is not None
         assert row["item_id"] == item_id
         assert row["seller_id"] == seller_id
@@ -98,10 +96,11 @@ async def test_create_item_inserts_row_and_get_item_for_prediction():
         assert dto["images_qty"] == item.images_qty
         assert dto["is_verified_seller"] is True
 
+        async with db_pool.acquire() as conn:
         # cleanup item
-        await conn.execute("DELETE FROM public.items WHERE item_id = $1", item_id)
+            await conn.execute("DELETE FROM public.items WHERE item_id = $1", item_id)
 
     finally:
         # cleanup user
-        await conn.execute("DELETE FROM public.users WHERE seller_id = $1", seller_id)
-        await conn.close()
+        async with db_pool.acquire() as conn:
+            await conn.execute("DELETE FROM public.users WHERE seller_id = $1", seller_id)
